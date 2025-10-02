@@ -122,20 +122,178 @@ def analizar_pilotos_especificos(tabla_historica, results, races, drivers):
     print(f"   • Pérez: #{pos_perez}")
     print(f"   • Bottas: #{pos_bottas}")
 
+def analizar_rendimiento_perez_por_circuito(results, races, drivers):
+    """
+    Análisis detallado del rendimiento de Sergio Pérez en cada circuito
+    """
+    print("\n" + "="*90)
+    print("🏁 ANÁLISIS DE RENDIMIENTO DE SERGIO PÉREZ POR CIRCUITO")
+    print("="*90)
+    
+    # Obtener ID de Sergio Pérez
+    perez_id = drivers[drivers['surname'] == 'Pérez']['driverId'].iloc[0]
+    
+    # Obtener todos los resultados de Pérez
+    resultados_perez = results[results['driverId'] == perez_id].copy()
+    
+    # Unir con información de carreras para obtener nombres de circuitos
+    resultados_con_carreras = resultados_perez.merge(
+        races[['raceId', 'name', 'year', 'circuitId']], 
+        on='raceId'
+    )
+    
+    # Cargar información de circuitos
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ruta = os.path.join(script_dir, "..", "archive") + os.sep
+    circuits = pd.read_csv(ruta + "circuits.csv")
+    
+    # Unir con información de circuitos para obtener ubicación
+    resultados_completos = resultados_con_carreras.merge(
+        circuits[['circuitId', 'location', 'country']], 
+        on='circuitId'
+    )
+    
+    # Análisis por circuito
+    stats_por_circuito = resultados_completos.groupby(['name', 'location', 'country']).agg({
+        'points': ['sum', 'mean', 'count'],
+        'position': lambda x: [pos for pos in x if pos not in ['\\N', None]],
+        'raceId': 'count'
+    }).reset_index()
+    
+    # Aplanar columnas
+    stats_por_circuito.columns = ['Circuito', 'Ubicacion', 'Pais', 'Puntos_Total', 'Puntos_Promedio', 
+                                 'Carreras_Puntos', 'Posiciones', 'Total_Carreras']
+    
+    # Calcular estadísticas adicionales
+    def calcular_estadisticas_posicion(posiciones):
+        posiciones_validas = [int(pos) for pos in posiciones if pos not in ['\\N', None]]
+        if not posiciones_validas:
+            return {
+                'mejor_posicion': 'N/A',
+                'posicion_promedio': 'N/A',
+                'podios': 0,
+                'victorias': 0,
+                'top5': 0,
+                'top10': 0
+            }
+        
+        return {
+            'mejor_posicion': min(posiciones_validas),
+            'posicion_promedio': sum(posiciones_validas) / len(posiciones_validas),
+            'podios': sum(1 for pos in posiciones_validas if pos <= 3),
+            'victorias': sum(1 for pos in posiciones_validas if pos == 1),
+            'top5': sum(1 for pos in posiciones_validas if pos <= 5),
+            'top10': sum(1 for pos in posiciones_validas if pos <= 10)
+        }
+    
+    # Aplicar cálculos a cada circuito
+    estadisticas_detalladas = []
+    for _, row in stats_por_circuito.iterrows():
+        stats = calcular_estadisticas_posicion(row['Posiciones'])
+        estadisticas_detalladas.append({
+            'Circuito': row['Circuito'],
+            'Ubicacion': row['Ubicacion'],
+            'Pais': row['Pais'],
+            'Carreras': row['Total_Carreras'],
+            'Puntos_Total': row['Puntos_Total'],
+            'Puntos_Promedio': round(row['Puntos_Promedio'], 2),
+            'Mejor_Posicion': stats['mejor_posicion'],
+            'Posicion_Promedio': round(stats['posicion_promedio'], 1) if stats['posicion_promedio'] != 'N/A' else 'N/A',
+            'Victorias': stats['victorias'],
+            'Podios': stats['podios'],
+            'Top5': stats['top5'],
+            'Top10': stats['top10']
+        })
+    
+    df_estadisticas = pd.DataFrame(estadisticas_detalladas)
+    
+    # Ordenar por puntos totales
+    df_estadisticas = df_estadisticas.sort_values('Puntos_Total', ascending=False)
+    
+    print(f"\n📊 RESUMEN GENERAL:")
+    print(f"• Circuitos diferentes disputados: {len(df_estadisticas)}")
+    print(f"• Total de carreras: {df_estadisticas['Carreras'].sum()}")
+    print(f"• Puntos totales acumulados: {df_estadisticas['Puntos_Total'].sum()}")
+    print(f"• Circuitos con al menos un podio: {len(df_estadisticas[df_estadisticas['Podios'] > 0])}")
+    print(f"• Circuitos con al menos una victoria: {len(df_estadisticas[df_estadisticas['Victorias'] > 0])}")
+    
+    # Top 10 mejores circuitos por puntos
+    print(f"\n🏆 TOP 10 CIRCUITOS FAVORITOS (más puntos totales):")
+    print("-" * 90)
+    top_circuitos = df_estadisticas.head(10)
+    for i, (_, circuito) in enumerate(top_circuitos.iterrows(), 1):
+        print(f"{i:2d}. {circuito['Circuito']:<35} ({circuito['Ubicacion']:<15}, {circuito['Pais']:<10})")
+        print(f"     Carreras: {circuito['Carreras']:2d} | Puntos: {circuito['Puntos_Total']:6.1f} | "
+              f"Promedio: {circuito['Puntos_Promedio']:5.2f} | Mejor pos: {circuito['Mejor_Posicion']:>3} | "
+              f"Podios: {circuito['Podios']}")
+    
+    # Circuitos con victorias
+    circuitos_victorias = df_estadisticas[df_estadisticas['Victorias'] > 0]
+    if len(circuitos_victorias) > 0:
+        print(f"\n🥇 CIRCUITOS CON VICTORIAS:")
+        print("-" * 90)
+        for _, circuito in circuitos_victorias.iterrows():
+            print(f"• {circuito['Circuito']:<35} ({circuito['Ubicacion']}, {circuito['Pais']})")
+            print(f"  Victorias: {circuito['Victorias']} | Total carreras: {circuito['Carreras']} | "
+                  f"Puntos totales: {circuito['Puntos_Total']}")
+    
+    # Circuitos más desafiantes (peor rendimiento)
+    print(f"\n😰 CIRCUITOS MÁS DESAFIANTES (menor promedio de puntos, mín. 3 carreras):")
+    print("-" * 90)
+    circuitos_dificiles = df_estadisticas[df_estadisticas['Carreras'] >= 3].tail(5)
+    for i, (_, circuito) in enumerate(circuitos_dificiles.iterrows(), 1):
+        print(f"{i}. {circuito['Circuito']:<35} ({circuito['Ubicacion']}, {circuito['Pais']})")
+        print(f"   Promedio: {circuito['Puntos_Promedio']:5.2f} puntos | "
+              f"Mejor posición: {circuito['Mejor_Posicion']:>3} | "
+              f"Carreras: {circuito['Carreras']}")
+    
+    # Análisis por región/país
+    print(f"\n🌍 ANÁLISIS POR REGIÓN:")
+    print("-" * 50)
+    por_pais = df_estadisticas.groupby('Pais').agg({
+        'Carreras': 'sum',
+        'Puntos_Total': 'sum',
+        'Puntos_Promedio': 'mean',
+        'Victorias': 'sum',
+        'Podios': 'sum'
+    }).sort_values('Puntos_Total', ascending=False)
+    
+    for pais, stats in por_pais.head(8).iterrows():
+        print(f"• {pais:<15}: {int(stats['Carreras']):3d} carreras, {stats['Puntos_Total']:6.1f} puntos, "
+            f"{int(stats['Victorias']):2d} victorias, {int(stats['Podios']):2d} podios")
+    
+    return df_estadisticas
+
 def crear_tabla_historica_pilotos():
     """
     Crea una tabla histórica de pilotos basada en los puntos totales sumados 
     a lo largo de toda su carrera en la Fórmula 1
     """
-    ruta = "../archive/"
+    # Obtener la ruta absoluta del directorio actual y construir la ruta a archive
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ruta = os.path.join(script_dir, "..", "archive") + os.sep
     
     print("📊 Creando tabla histórica de pilotos...")
+    print(f"🔍 Buscando archivos en: {ruta}")
+    
+    # Verificar que el directorio existe
+    if not os.path.exists(ruta):
+        print(f"❌ Error: No se encontró el directorio {ruta}")
+        return None
     
     # Cargar los datos necesarios
     print("📂 Cargando datos...")
-    drivers = pd.read_csv(ruta + "drivers.csv")
-    results = pd.read_csv(ruta + "results.csv")
-    races = pd.read_csv(ruta + "races.csv")
+    try:
+        drivers = pd.read_csv(ruta + "drivers.csv")
+        results = pd.read_csv(ruta + "results.csv")
+        races = pd.read_csv(ruta + "races.csv")
+        print(f"✅ Archivos cargados exitosamente!")
+        print(f"   • Pilotos: {len(drivers)} registros")
+        print(f"   • Resultados: {len(results)} registros")
+        print(f"   • Carreras: {len(races)} registros")
+    except FileNotFoundError as e:
+        print(f"❌ Error al cargar archivos: {e}")
+        return None
     
     # Filtrar solo resultados con puntos válidos (no nulos)
     results_con_puntos = results[results['points'].notna()].copy()
@@ -186,24 +344,32 @@ def crear_tabla_historica_pilotos():
 
 # Ejecutar la función
 if __name__ == "__main__":
-    tabla, año_inicio, año_fin, results, races, drivers = crear_tabla_historica_pilotos()
+    resultado = crear_tabla_historica_pilotos()
     
-    print(f"\n🏆 TABLA HISTÓRICA DE PILOTOS F1 ({año_inicio}-{año_fin})")
-    print("=" * 80)
-    
-    # Mostrar el TOP 20
-    print("\n🥇 TOP 20 PILOTOS CON MÁS PUNTOS EN LA HISTORIA:")
-    print(tabla.head(20).to_string(index=False))
-    
-    print(f"\n📈 ESTADÍSTICAS GENERALES:")
-    print(f"• Total de pilotos en la historia: {len(tabla):,}")
-    print(f"• Puntos máximos obtenidos: {tabla['Puntos Totales'].max():,.0f} ({tabla.iloc[0]['Piloto']})")
-    print(f"• Promedio de carreras por piloto: {tabla['Carreras'].mean():.1f}")
-    print(f"• Piloto con más victorias: {tabla.loc[tabla['Victorias'].idxmax(), 'Piloto']} ({tabla['Victorias'].max():.0f} victorias)")
-    
-    # Guardar en CSV si se desea
-    # tabla.to_csv("tabla_historica_pilotos_f1.csv", index=False, encoding='utf-8')
-    # print("\n💾 Tabla guardada como 'tabla_historica_pilotos_f1.csv'")
-    
-    # Análisis histórico detallado de pilotos específicos
-    analizar_pilotos_especificos(tabla, results, races, drivers)
+    if resultado is None:
+        print("❌ No se pudieron cargar los datos. Verifica que los archivos CSV estén en el directorio correcto.")
+    else:
+        tabla, año_inicio, año_fin, results, races, drivers = resultado
+        
+        print(f"\n🏆 TABLA HISTÓRICA DE PILOTOS F1 ({año_inicio}-{año_fin})")
+        print("=" * 80)
+        
+        # Mostrar el TOP 20
+        print("\n🥇 TOP 20 PILOTOS CON MÁS PUNTOS EN LA HISTORIA:")
+        print(tabla.head(20).to_string(index=False))
+        
+        print(f"\n📈 ESTADÍSTICAS GENERALES:")
+        print(f"• Total de pilotos en la historia: {len(tabla):,}")
+        print(f"• Puntos máximos obtenidos: {tabla['Puntos Totales'].max():,.0f} ({tabla.iloc[0]['Piloto']})")
+        print(f"• Promedio de carreras por piloto: {tabla['Carreras'].mean():.1f}")
+        print(f"• Piloto con más victorias: {tabla.loc[tabla['Victorias'].idxmax(), 'Piloto']} ({tabla['Victorias'].max():.0f} victorias)")
+        
+        # Guardar en CSV si se desea
+        # tabla.to_csv("tabla_historica_pilotos_f1.csv", index=False, encoding='utf-8')
+        # print("\n💾 Tabla guardada como 'tabla_historica_pilotos_f1.csv'")
+        
+        # Análisis histórico detallado de pilotos específicos
+        analizar_pilotos_especificos(tabla, results, races, drivers)
+        
+        # Análisis de rendimiento de Pérez por circuito
+        estadisticas_circuitos = analizar_rendimiento_perez_por_circuito(results, races, drivers)
